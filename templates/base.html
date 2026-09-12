@@ -18,6 +18,7 @@
       <h1>श्री स्वामी समर्थ फूड्स – यमुना मेस</h1>
       <p>RIT Mess / Sakharale • Santosh Shivaji Mane • 9860851681</p>
     </div>
+    <div class="header-actions">{% if admin %}<a class="header-link" href="/admin">Admin</a>{% elif student_logged_in %}<a class="header-link" href="/student/dashboard">My Profile</a>{% else %}<a class="header-link" href="/student/login">Student Login</a><a class="header-link" href="/admin/login">Admin</a>{% endif %}</div>
   </div>
 </header>
 <main>

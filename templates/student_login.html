@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow login-card">
+  <div class="login-icon">👨‍🎓</div>
+  <h2>Student Login / विद्यार्थी लॉगिन</h2>
+  <p class="muted">Registration वेळी दिलेला Roll No. आणि Mobile No. वापरा.</p>
+  <form method="post">
+    <input name="roll" value="{{ request.args.get('roll','') }}" placeholder="Roll Number / रोल नंबर" required>
+    <input name="phone" type="tel" placeholder="Mobile Number / मोबाईल नंबर" required>
+    <button type="submit">Login / लॉगिन</button>
+  </form>
+  <a class="btn secondary full-btn" href="/register">New Student Registration / नवीन नोंदणी</a>
+</div>
+{% endblock %}
