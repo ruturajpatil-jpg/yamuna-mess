@@ -129,7 +129,8 @@ def admin_required(f):
 def common():
     return {
         "today": date.today().isoformat(),
-        "admin": session.get("admin")
+        "admin": session.get("admin"),
+        "student_logged_in": bool(session.get("student_id"))
     }
 
 @app.route("/")
@@ -156,7 +157,7 @@ def register():
                     "course": course, "photo_data": photo_data
                 })
             flash("Registration successful. / नोंदणी यशस्वी झाली.")
-            return redirect(url_for("home"))
+            return redirect(url_for("student_login", roll=roll))
         except IntegrityError:
             flash("Roll No already exists. / Roll No आधीच आहे.")
 
@@ -164,12 +165,72 @@ def register():
 
 @app.route("/student", methods=["GET"])
 def student():
-    # Student profiles are private and can only be viewed from the admin dashboard.
-    if not session.get("admin"):
-        flash("Student profile is available only to Admin. / विद्यार्थी प्रोफाइल फक्त Admin साठी आहे.")
-        return redirect(url_for("admin_login"))
-    roll = request.args.get("roll", "").strip()
-    return redirect(url_for("admin_student", q=roll))
+    if not session.get("student_id"):
+        return redirect(url_for("student_login"))
+    return redirect(url_for("student_dashboard"))
+
+@app.route("/student/login", methods=["GET", "POST"])
+def student_login():
+    if session.get("student_id"):
+        return redirect(url_for("student_dashboard"))
+    if request.method == "POST":
+        roll = request.form.get("roll", "").strip()
+        phone = request.form.get("phone", "").strip()
+        with engine.begin() as c:
+            s = c.execute(text("""
+                SELECT id, name FROM students
+                WHERE LOWER(roll)=LOWER(:roll) AND phone=:phone
+                LIMIT 1
+            """), {"roll": roll, "phone": phone}).mappings().first()
+        if s:
+            session.clear()
+            session["student_id"] = s["id"]
+            return redirect(url_for("student_dashboard"))
+        flash("Roll No. आणि Mobile No. जुळत नाहीत. / Login details do not match.")
+    return render_template("student_login.html")
+
+@app.get("/student/logout")
+def student_logout():
+    session.pop("student_id", None)
+    return redirect(url_for("home"))
+
+@app.get("/student/dashboard")
+def student_dashboard():
+    sid = session.get("student_id")
+    if not sid:
+        return redirect(url_for("student_login"))
+    today = date.today()
+    month_start = today.replace(day=1)
+    with engine.begin() as c:
+        student = c.execute(text("SELECT * FROM students WHERE id=:id"), {"id": sid}).mappings().first()
+        if not student:
+            session.pop("student_id", None)
+            return redirect(url_for("student_login"))
+        attendance = c.execute(text("""
+            SELECT menu_date, meal, created_at FROM attendance
+            WHERE student_id=:sid ORDER BY menu_date DESC, meal
+        """), {"sid": sid}).mappings().all()
+        month_counts = c.execute(text("""
+            SELECT COUNT(*) AS total, COUNT(DISTINCT menu_date) AS days
+            FROM attendance WHERE student_id=:sid AND menu_date >= :start AND menu_date <= :end
+        """), {"sid": sid, "start": month_start, "end": today}).mappings().first()
+        today_meals = set(c.execute(text("""
+            SELECT meal FROM attendance WHERE student_id=:sid AND menu_date=:d
+        """), {"sid": sid, "d": today}).scalars().all())
+        menus = c.execute(text("""
+            SELECT menu_date, meal, item FROM menus
+            WHERE menu_date >= :d ORDER BY menu_date ASC,
+            CASE meal WHEN 'Breakfast' THEN 1 WHEN 'Lunch' THEN 2 WHEN 'Evening Snacks' THEN 3 WHEN 'Dinner' THEN 4 ELSE 5 END
+            LIMIT 20
+        """), {"d": today}).mappings().all()
+        payments = c.execute(text("""
+            SELECT amount, paid_date, note FROM payments
+            WHERE student_id=:sid ORDER BY paid_date DESC, id DESC
+        """), {"sid": sid}).mappings().all()
+        paid_total = c.execute(text("SELECT COALESCE(SUM(amount),0) FROM payments WHERE student_id=:sid"), {"sid": sid}).scalar()
+    return render_template("student_dashboard.html", student=student, attendance=attendance,
+                           month_counts=month_counts, today_meals=today_meals, menus=menus,
+                           payments=payments, paid_total=paid_total, month_name=today.strftime("%B %Y"))
 
 @app.post("/attendance")
 def mark_attendance():
