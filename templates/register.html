@@ -1,1 +1,16 @@
-{% extends "base.html" %}{% block content %}<div class="card"><h2>👨‍🎓 Student Registration</h2><form method="post"><label>Name / नाव</label><input name="name" required><label>Roll No / ID</label><input name="roll" required><label>Mobile</label><input name="phone"><label>Course</label><input name="course"><button>Save Registration</button></form></div>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow">
+  <h2>📝 Student Registration / विद्यार्थी नोंदणी</h2>
+  <form method="post" enctype="multipart/form-data">
+    <input name="name" placeholder="Student Name / विद्यार्थी नाव" required>
+    <input name="roll" placeholder="Roll No" required>
+    <input name="phone" placeholder="Mobile Number">
+    <input name="course" placeholder="Course / Branch">
+    <label class="file-label">📸 Student Photo / फोटो
+      <input type="file" name="photo" accept="image/*">
+    </label>
+    <button type="submit">Register / नोंदणी करा</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,1 +1,30 @@
-<!doctype html><html lang="mr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#7b1e1e"><title>यमुना मेस</title><link rel="stylesheet" href="/static/style.css"></head><body><header><h1>🙏 श्री स्वामी समर्थ फूड्स – यमुना मेस</h1><p>RIT Mess / Sakharale • Santosh Shivaji Mane • 9860851681</p></header><main>{% with msgs=get_flashed_messages() %}{% for m in msgs %}<div class="flash">{{m}}</div>{% endfor %}{% endwith %}{% block content %}{% endblock %}</main><footer>📞 9860851681 • Yamuna Mess</footer></body></html>
+<!doctype html>
+<html lang="mr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#7b1e1e">
+  <title>श्री स्वामी समर्थ फूड्स – यमुना मेस</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">
+    <img src="/static/logo.png" alt="श्री स्वामी समर्थ फूड्स – यमुना मेस Logo">
+    <div>
+      <h1>श्री स्वामी समर्थ फूड्स – यमुना मेस</h1>
+      <p>RIT Mess / Sakharale • Santosh Shivaji Mane • 9860851681</p>
+    </div>
+  </div>
+</header>
+<main>
+  {% with msgs=get_flashed_messages() %}
+    {% for m in msgs %}
+      <div class="flash">{{m}}</div>
+    {% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+<footer>📞 9860851681 • Yamuna Mess</footer>
+</body>
+</html>

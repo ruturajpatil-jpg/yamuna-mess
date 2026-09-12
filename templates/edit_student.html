@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow"><h2>✏️ Edit Student / विद्यार्थी माहिती बदला</h2><form method="post" enctype="multipart/form-data"><input name="name" value="{{student.name}}" required><input name="roll" value="{{student.roll}}" required><input name="phone" value="{{student.phone or ''}}"><input name="course" value="{{student.course or ''}}"><label class="file-label">📸 Change Photo<input type="file" name="photo" accept="image/*"></label>{% if student.photo_data %}<input type="hidden" name="keep_photo" value="1"><img class="edit-photo" src="{{student.photo_data}}">{% endif %}<button>Save Changes / बदल जतन करा</button><a class="btn secondary" href="/admin">Cancel</a></form></div>
+{% endblock %}
