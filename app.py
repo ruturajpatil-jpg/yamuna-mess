@@ -1,80 +1,121 @@
 import os
+import base64
+from io import BytesIO
 from datetime import date, datetime
 from functools import wraps
+
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
+from PIL import Image
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "CHANGE_ME_IN_RAILWAY")
+
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
 ADMIN_PASS = os.environ.get("ADMIN_PASS", "CHANGE_ME_IN_RAILWAY")
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 if not DATABASE_URL:
-    # Local fallback for testing; Railway should always set DATABASE_URL.
     DATABASE_URL = "sqlite:///yamuna_mess_local.db"
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS students (
- id SERIAL PRIMARY KEY,
- name TEXT NOT NULL,
- roll TEXT UNIQUE NOT NULL,
- phone TEXT,
- course TEXT,
- created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    roll TEXT UNIQUE NOT NULL,
+    phone TEXT,
+    course TEXT,
+    photo_data TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
 CREATE TABLE IF NOT EXISTS menus (
- id SERIAL PRIMARY KEY,
- menu_date DATE NOT NULL,
- meal TEXT NOT NULL,
- item TEXT NOT NULL
+    id SERIAL PRIMARY KEY,
+    menu_date DATE NOT NULL,
+    meal TEXT NOT NULL,
+    item TEXT NOT NULL
 );
+
 CREATE TABLE IF NOT EXISTS attendance (
- id SERIAL PRIMARY KEY,
- student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
- menu_date DATE NOT NULL,
- meal TEXT NOT NULL,
- created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
- UNIQUE(student_id, menu_date, meal)
+    id SERIAL PRIMARY KEY,
+    student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    menu_date DATE NOT NULL,
+    meal TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(student_id, menu_date, meal)
 );
+
 CREATE TABLE IF NOT EXISTS payments (
- id SERIAL PRIMARY KEY,
- student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
- amount NUMERIC(12,2) NOT NULL,
- paid_date DATE NOT NULL,
- note TEXT
+    id SERIAL PRIMARY KEY,
+    student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+    amount NUMERIC(12,2) NOT NULL,
+    paid_date DATE NOT NULL,
+    note TEXT
 );
 """
 
 def init_db():
     with engine.begin() as c:
-        # SQLite local fallback needs INTEGER primary keys instead of SERIAL.
         if DATABASE_URL.startswith("sqlite"):
             c.execute(text("""
-            CREATE TABLE IF NOT EXISTS students (
-             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
-             roll TEXT UNIQUE NOT NULL, phone TEXT, course TEXT,
-             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-            CREATE TABLE IF NOT EXISTS menus (
-             id INTEGER PRIMARY KEY AUTOINCREMENT, menu_date DATE NOT NULL,
-             meal TEXT NOT NULL, item TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS attendance (
-             id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL,
-             menu_date DATE NOT NULL, meal TEXT NOT NULL,
-             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-             UNIQUE(student_id, menu_date, meal));
-            CREATE TABLE IF NOT EXISTS payments (
-             id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL,
-             amount NUMERIC(12,2) NOT NULL, paid_date DATE NOT NULL, note TEXT);
+                CREATE TABLE IF NOT EXISTS students (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    roll TEXT UNIQUE NOT NULL,
+                    phone TEXT,
+                    course TEXT,
+                    photo_data TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS menus (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    menu_date DATE NOT NULL,
+                    meal TEXT NOT NULL,
+                    item TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS attendance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_id INTEGER NOT NULL,
+                    menu_date DATE NOT NULL,
+                    meal TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(student_id, menu_date, meal)
+                );
+                CREATE TABLE IF NOT EXISTS payments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    student_id INTEGER NOT NULL,
+                    amount NUMERIC(12,2) NOT NULL,
+                    paid_date DATE NOT NULL,
+                    note TEXT
+                );
             """))
         else:
             c.execute(text(SCHEMA))
+        # Safe migration for existing Railway/PostgreSQL or local databases.
+        try:
+            c.execute(text("ALTER TABLE students ADD COLUMN photo_data TEXT"))
+        except Exception:
+            pass
+
 init_db()
+
+def save_photo(file):
+    if not file or not getattr(file, "filename", ""):
+        return None
+    try:
+        img = Image.open(file.stream).convert("RGB")
+        img.thumbnail((500, 500))
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=78, optimize=True)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return None
 
 def admin_required(f):
     @wraps(f)
@@ -86,76 +127,108 @@ def admin_required(f):
 
 @app.context_processor
 def common():
-    return {"today": date.today().isoformat(), "admin": session.get("admin")}
+    return {
+        "today": date.today().isoformat(),
+        "admin": session.get("admin")
+    }
 
 @app.route("/")
 def home():
-    with engine.begin() as c:
-        rows = c.execute(text("""
-          SELECT meal, STRING_AGG(item, ' + ') AS item
-          FROM menus WHERE menu_date=:d GROUP BY meal
-        """), {"d": date.today()}).mappings().all() if not DATABASE_URL.startswith("sqlite") else c.execute(text("""
-          SELECT meal, GROUP_CONCAT(item, ' + ') AS item
-          FROM menus WHERE menu_date=:d GROUP BY meal
-        """), {"d": date.today()}).mappings().all()
-    return render_template("home.html", menus=rows)
+    # Student-facing landing page: no menu cards.
+    return render_template("home.html")
 
-@app.route("/register", methods=["GET","POST"])
+@app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        name=request.form["name"].strip()
-        roll=request.form["roll"].strip()
-        phone=request.form.get("phone","").strip()
-        course=request.form.get("course","").strip()
+        name = request.form["name"].strip()
+        roll = request.form["roll"].strip()
+        phone = request.form.get("phone", "").strip()
+        course = request.form.get("course", "").strip()
+        photo_data = save_photo(request.files.get("photo"))
+
         try:
             with engine.begin() as c:
                 c.execute(text("""
-                  INSERT INTO students(name,roll,phone,course)
-                  VALUES(:name,:roll,:phone,:course)
-                """), locals())
+                    INSERT INTO students(name, roll, phone, course, photo_data)
+                    VALUES(:name, :roll, :phone, :course, :photo_data)
+                """), {
+                    "name": name, "roll": roll, "phone": phone,
+                    "course": course, "photo_data": photo_data
+                })
             flash("Registration successful. / नोंदणी यशस्वी झाली.")
             return redirect(url_for("student", roll=roll))
         except IntegrityError:
             flash("Roll No already exists. / Roll No आधीच आहे.")
+
     return render_template("register.html")
 
 @app.route("/student", methods=["GET"])
 def student():
-    roll=request.args.get("roll","").strip()
+    roll = request.args.get("roll", "").strip()
+
     with engine.begin() as c:
-        s=c.execute(text("SELECT * FROM students WHERE roll=:roll"), {"roll":roll}).mappings().first()
+        s = c.execute(
+            text("SELECT * FROM students WHERE roll=:roll"),
+            {"roll": roll}
+        ).mappings().first()
+
         if not s:
             return render_template("student.html", student=None, roll=roll)
-        att=c.execute(text("""
-          SELECT meal FROM attendance WHERE student_id=:id AND menu_date=:d
-        """), {"id":s["id"],"d":date.today()}).mappings().all()
-        paid=c.execute(text("""
-          SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE student_id=:id
-        """), {"id":s["id"]}).mappings().first()["total"]
-    return render_template("student.html", student=s, att=[x["meal"] for x in att], paid=paid)
+
+        att = c.execute(text("""
+            SELECT meal
+            FROM attendance
+            WHERE student_id=:id AND menu_date=:d
+        """), {"id": s["id"], "d": date.today()}).mappings().all()
+
+        paid = c.execute(text("""
+            SELECT COALESCE(SUM(amount),0) AS total
+            FROM payments WHERE student_id=:id
+        """), {"id": s["id"]}).mappings().first()["total"]
+
+    return render_template(
+        "student.html",
+        student=s,
+        att=[x["meal"] for x in att],
+        paid=paid
+    )
 
 @app.post("/attendance")
 def mark_attendance():
-    roll=request.form["roll"]; meal=request.form["meal"]
+    roll = request.form["roll"]
+    meal = request.form["meal"]
+
     with engine.begin() as c:
-        s=c.execute(text("SELECT id FROM students WHERE roll=:roll"), {"roll":roll}).mappings().first()
+        s = c.execute(
+            text("SELECT id FROM students WHERE roll=:roll"),
+            {"roll": roll}
+        ).mappings().first()
+
         if s:
             try:
                 c.execute(text("""
-                  INSERT INTO attendance(student_id,menu_date,meal)
-                  VALUES(:sid,:d,:meal)
-                """), {"sid":s["id"],"d":date.today(),"meal":meal})
+                    INSERT INTO attendance(student_id, menu_date, meal)
+                    VALUES(:sid, :d, :meal)
+                """), {
+                    "sid": s["id"],
+                    "d": date.today(),
+                    "meal": meal
+                })
             except IntegrityError:
                 pass
+
     return redirect(url_for("student", roll=roll))
 
-@app.route("/admin/login", methods=["GET","POST"])
+@app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
-    if request.method=="POST":
-        if request.form["username"]==ADMIN_USER and request.form["password"]==ADMIN_PASS:
-            session["admin"]=True
+    if request.method == "POST":
+        if (request.form["username"] == ADMIN_USER and
+                request.form["password"] == ADMIN_PASS):
+            session["admin"] = True
             return redirect(url_for("dashboard"))
-        flash("Invalid admin login.")
+
+        flash("Invalid admin login. / चुकीचे Admin Login.")
+
     return render_template("login.html")
 
 @app.get("/admin/logout")
@@ -166,54 +239,182 @@ def logout():
 @app.route("/admin")
 @admin_required
 def dashboard():
+    q = request.args.get("q", "").strip()
     with engine.begin() as c:
-        students=c.execute(text("SELECT * FROM students ORDER BY id DESC")).mappings().all()
-        counts={}
-        for meal in ["Breakfast","Lunch","Evening Snacks","Dinner"]:
-            counts[meal]=c.execute(text("""
-              SELECT COUNT(*) n FROM attendance
-              WHERE menu_date=:d AND meal=:meal
-            """), {"d":date.today(),"meal":meal}).scalar()
-    return render_template("admin.html", students=students, counts=counts)
+        students = c.execute(text("""
+            SELECT s.*, COALESCE(SUM(p.amount),0) AS paid_total
+            FROM students s LEFT JOIN payments p ON p.student_id=s.id
+            GROUP BY s.id ORDER BY s.id DESC
+        """)).mappings().all()
+
+        counts = {}
+        for meal in ["Breakfast", "Lunch", "Evening Snacks", "Dinner"]:
+            counts[meal] = c.execute(text("""
+                SELECT COUNT(*) FROM attendance
+                WHERE menu_date=:d AND meal=:meal
+            """), {"d": date.today(), "meal": meal}).scalar()
+
+        today_attendance = c.execute(text("""
+            SELECT student_id, meal FROM attendance WHERE menu_date=:d
+        """), {"d": date.today()}).mappings().all()
+
+    lunch_ids = {x["student_id"] for x in today_attendance if x["meal"] == "Lunch"}
+    dinner_ids = {x["student_id"] for x in today_attendance if x["meal"] == "Dinner"}
+    return render_template("admin.html", students=students, counts=counts,
+                           lunch_ids=lunch_ids, dinner_ids=dinner_ids, q=q)
+
+@app.get("/admin/student")
+@admin_required
+def admin_student():
+    q = request.args.get("q", "").strip()
+    if not q:
+        return redirect(url_for("dashboard"))
+    with engine.begin() as c:
+        student = c.execute(text("""
+            SELECT s.*, COALESCE(SUM(p.amount),0) AS paid_total
+            FROM students s LEFT JOIN payments p ON p.student_id=s.id
+            WHERE LOWER(s.roll)=LOWER(:q) OR LOWER(s.name) LIKE LOWER(:like)
+            GROUP BY s.id ORDER BY CASE WHEN LOWER(s.roll)=LOWER(:q) THEN 0 ELSE 1 END, s.name
+            LIMIT 1
+        """), {"q": q, "like": f"%{q}%"}).mappings().first()
+        if not student:
+            flash("Student not found. / विद्यार्थी सापडला नाही.")
+            return redirect(url_for("dashboard"))
+
+        attendance = c.execute(text("""
+            SELECT menu_date, meal, created_at FROM attendance
+            WHERE student_id=:sid ORDER BY menu_date DESC, created_at DESC
+        """), {"sid": student["id"]}).mappings().all()
+        payments = c.execute(text("""
+            SELECT amount, paid_date, note FROM payments
+            WHERE student_id=:sid ORDER BY paid_date DESC, id DESC
+        """), {"sid": student["id"]}).mappings().all()
+        today = c.execute(text("""
+            SELECT meal FROM attendance WHERE student_id=:sid AND menu_date=:d
+        """), {"sid": student["id"], "d": date.today()}).scalars().all()
+
+    return render_template("admin_student.html", student=student, attendance=attendance,
+                           payments=payments, today_meals=set(today))
+
+@app.route("/admin/student/<int:student_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_student(student_id):
+    with engine.begin() as c:
+        student = c.execute(text("SELECT * FROM students WHERE id=:id"), {"id": student_id}).mappings().first()
+        if not student:
+            flash("Student not found. / विद्यार्थी सापडला नाही.")
+            return redirect(url_for("dashboard"))
+        if request.method == "POST":
+            name = request.form["name"].strip()
+            roll = request.form["roll"].strip()
+            phone = request.form.get("phone", "").strip()
+            course = request.form.get("course", "").strip()
+            photo_data = save_photo(request.files.get("photo"))
+            keep_photo = request.form.get("keep_photo") == "1"
+            if photo_data is None and keep_photo:
+                photo_data = student.get("photo_data")
+            try:
+                c.execute(text("""
+                    UPDATE students SET name=:name, roll=:roll, phone=:phone, course=:course, photo_data=:photo
+                    WHERE id=:id
+                """), {"name":name,"roll":roll,"phone":phone,"course":course,"photo":photo_data,"id":student_id})
+                flash("Student updated. / विद्यार्थी माहिती अपडेट झाली.")
+                return redirect(url_for("admin_student", q=roll))
+            except IntegrityError:
+                flash("Roll No already exists. / Roll No आधीच आहे.")
+    return render_template("edit_student.html", student=student)
+
+@app.post("/admin/attendance")
+@admin_required
+def admin_attendance():
+    student_id = request.form["student_id"]
+    meal = request.form["meal"]
+
+    with engine.begin() as c:
+        try:
+            c.execute(text("""
+                INSERT INTO attendance(student_id, menu_date, meal)
+                VALUES(:sid, :d, :meal)
+            """), {
+                "sid": student_id,
+                "d": date.today(),
+                "meal": meal
+            })
+            flash("Attendance saved. / उपस्थिती सेव्ह झाली.")
+        except IntegrityError:
+            flash("Attendance already saved. / उपस्थिती आधीच सेव्ह आहे.")
+
+    return redirect(url_for("dashboard"))
 
 @app.post("/admin/menu")
 @admin_required
 def add_menu():
     with engine.begin() as c:
         c.execute(text("""
-          INSERT INTO menus(menu_date,meal,item) VALUES(:d,:meal,:item)
-        """), {"d":request.form["menu_date"],"meal":request.form["meal"],"item":request.form["item"]})
+            INSERT INTO menus(menu_date, meal, item)
+            VALUES(:d, :meal, :item)
+        """), {
+            "d": request.form["menu_date"],
+            "meal": request.form["meal"],
+            "item": request.form["item"]
+        })
+
     return redirect(url_for("dashboard"))
 
 @app.post("/admin/payment")
 @admin_required
 def payment():
     with engine.begin() as c:
-        s=c.execute(text("SELECT id FROM students WHERE roll=:roll"), {"roll":request.form["roll"]}).mappings().first()
+        s = c.execute(
+            text("SELECT id FROM students WHERE roll=:roll"),
+            {"roll": request.form["roll"]}
+        ).mappings().first()
+
         if s:
             c.execute(text("""
-              INSERT INTO payments(student_id,amount,paid_date,note)
-              VALUES(:sid,:amount,:d,:note)
-            """), {"sid":s["id"],"amount":float(request.form["amount"]),
-                    "d":date.today(),"note":request.form.get("note","")})
+                INSERT INTO payments(student_id, amount, paid_date, note)
+                VALUES(:sid, :amount, :d, :note)
+            """), {
+                "sid": s["id"],
+                "amount": float(request.form["amount"]),
+                "d": date.today(),
+                "note": request.form.get("note", "")
+            })
+
     return redirect(url_for("dashboard"))
 
 @app.get("/admin/export")
 @admin_required
 def export():
     with engine.begin() as c:
-        students=[dict(x) for x in c.execute(text("SELECT * FROM students")).mappings().all()]
-        attendance=[dict(x) for x in c.execute(text("SELECT * FROM attendance")).mappings().all()]
-        payments=[dict(x) for x in c.execute(text("SELECT * FROM payments")).mappings().all()]
-    return jsonify({"students":students,"attendance":attendance,"payments":payments})
+        students = [dict(x) for x in c.execute(
+            text("SELECT * FROM students")
+        ).mappings().all()]
+        attendance = [dict(x) for x in c.execute(
+            text("SELECT * FROM attendance")
+        ).mappings().all()]
+        payments = [dict(x) for x in c.execute(
+            text("SELECT * FROM payments")
+        ).mappings().all()]
+
+    return jsonify({
+        "students": students,
+        "attendance": attendance,
+        "payments": payments
+    })
 
 @app.get("/health")
 def health():
     try:
-        with engine.begin() as c: c.execute(text("SELECT 1"))
-        return {"status":"ok","database":"connected"}
+        with engine.begin() as c:
+            c.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "connected"}
     except Exception as e:
-        return {"status":"error","database":"unavailable","message":str(e)},500
+        return {
+            "status": "error",
+            "database": "unavailable",
+            "message": str(e)
+        }, 500
 
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)))
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
