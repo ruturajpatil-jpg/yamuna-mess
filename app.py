@@ -156,7 +156,7 @@ def register():
                     "course": course, "photo_data": photo_data
                 })
             flash("Registration successful. / नोंदणी यशस्वी झाली.")
-            return redirect(url_for("student", roll=roll))
+            return redirect(url_for("home"))
         except IntegrityError:
             flash("Roll No already exists. / Roll No आधीच आहे.")
 
@@ -164,34 +164,12 @@ def register():
 
 @app.route("/student", methods=["GET"])
 def student():
+    # Student profiles are private and can only be viewed from the admin dashboard.
+    if not session.get("admin"):
+        flash("Student profile is available only to Admin. / विद्यार्थी प्रोफाइल फक्त Admin साठी आहे.")
+        return redirect(url_for("admin_login"))
     roll = request.args.get("roll", "").strip()
-
-    with engine.begin() as c:
-        s = c.execute(
-            text("SELECT * FROM students WHERE roll=:roll"),
-            {"roll": roll}
-        ).mappings().first()
-
-        if not s:
-            return render_template("student.html", student=None, roll=roll)
-
-        att = c.execute(text("""
-            SELECT meal
-            FROM attendance
-            WHERE student_id=:id AND menu_date=:d
-        """), {"id": s["id"], "d": date.today()}).mappings().all()
-
-        paid = c.execute(text("""
-            SELECT COALESCE(SUM(amount),0) AS total
-            FROM payments WHERE student_id=:id
-        """), {"id": s["id"]}).mappings().first()["total"]
-
-    return render_template(
-        "student.html",
-        student=s,
-        att=[x["meal"] for x in att],
-        paid=paid
-    )
+    return redirect(url_for("admin_student", q=roll))
 
 @app.post("/attendance")
 def mark_attendance():
