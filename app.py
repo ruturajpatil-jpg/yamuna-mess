@@ -8,6 +8,8 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from PIL import Image
+from werkzeug.security import generate_password_hash, check_password_hash
+import requests
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "CHANGE_ME_IN_RAILWAY")
@@ -32,6 +34,8 @@ CREATE TABLE IF NOT EXISTS students (
     phone TEXT,
     course TEXT,
     photo_data TEXT,
+    username TEXT UNIQUE,
+    password_hash TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -71,6 +75,8 @@ def init_db():
                     phone TEXT,
                     course TEXT,
                     photo_data TEXT,
+                    username TEXT UNIQUE,
+                    password_hash TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS menus (
@@ -98,8 +104,22 @@ def init_db():
         else:
             c.execute(text(SCHEMA))
         # Safe migration for existing Railway/PostgreSQL or local databases.
+        for stmt in [
+            "ALTER TABLE students ADD COLUMN photo_data TEXT",
+            "ALTER TABLE students ADD COLUMN username TEXT",
+            "ALTER TABLE students ADD COLUMN password_hash TEXT"
+        ]:
+            try:
+                c.execute(text(stmt))
+            except Exception:
+                pass
+        # Give existing students a safe transitional login: username=roll, password=old mobile.
         try:
-            c.execute(text("ALTER TABLE students ADD COLUMN photo_data TEXT"))
+            rows = c.execute(text("SELECT id, roll, phone FROM students WHERE username IS NULL OR password_hash IS NULL")).mappings().all()
+            for r in rows:
+                c.execute(text("UPDATE students SET username=:u, password_hash=:p WHERE id=:id"), {
+                    "u": r["roll"], "p": generate_password_hash(r["phone"] or r["roll"]), "id": r["id"]
+                })
         except Exception:
             pass
 
@@ -116,6 +136,38 @@ def save_photo(file):
         return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
     except Exception:
         return None
+
+def whatsapp_notify(student, meal):
+    token = os.environ.get("WHATSAPP_ACCESS_TOKEN", "").strip()
+    phone_number_id = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+    api_version = os.environ.get("WHATSAPP_API_VERSION", "v23.0").strip()
+    template_name = os.environ.get("WHATSAPP_ATTENDANCE_TEMPLATE", "").strip()
+    if not token or not phone_number_id or not template_name or not student.get("phone"):
+        return False, "WhatsApp API not configured"
+    phone = "".join(ch for ch in str(student["phone"]) if ch.isdigit())
+    if len(phone) == 10:
+        phone = "91" + phone
+    url = f"https://graph.facebook.com/{api_version}/{phone_number_id}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": os.environ.get("WHATSAPP_TEMPLATE_LANGUAGE", "mr")},
+            "components": [{"type": "body", "parameters": [
+                {"type": "text", "text": str(student["name"])},
+                {"type": "text", "text": str(meal)}
+            ]}]
+        }
+    }
+    try:
+        r = requests.post(url, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, json=payload, timeout=12)
+        if r.ok:
+            return True, "sent"
+        return False, r.text[:300]
+    except Exception as e:
+        return False, str(e)[:300]
 
 def admin_required(f):
     @wraps(f)
@@ -135,8 +187,11 @@ def common():
 
 @app.route("/")
 def home():
-    # Student-facing landing page: no menu cards.
-    return render_template("home.html")
+    if session.get("admin"):
+        return redirect(url_for("dashboard"))
+    if session.get("student_id"):
+        return redirect(url_for("student_dashboard"))
+    return redirect(url_for("login"))
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -146,18 +201,24 @@ def register():
         phone = request.form.get("phone", "").strip()
         course = request.form.get("course", "").strip()
         photo_data = save_photo(request.files.get("photo"))
+        username = request.form.get("username", "").strip() or roll
+        password = request.form.get("password", "").strip()
+        if not password:
+            flash("Password आवश्यक आहे. / Password is required.")
+            return render_template("register.html")
 
         try:
             with engine.begin() as c:
                 c.execute(text("""
-                    INSERT INTO students(name, roll, phone, course, photo_data)
-                    VALUES(:name, :roll, :phone, :course, :photo_data)
+                    INSERT INTO students(name, roll, phone, course, photo_data, username, password_hash)
+                    VALUES(:name, :roll, :phone, :course, :photo_data, :username, :password_hash)
                 """), {
                     "name": name, "roll": roll, "phone": phone,
-                    "course": course, "photo_data": photo_data
+                    "course": course, "photo_data": photo_data,
+                    "username": username, "password_hash": generate_password_hash(password)
                 })
             flash("Registration successful. / नोंदणी यशस्वी झाली.")
-            return redirect(url_for("student_login", roll=roll))
+            return redirect(url_for("login"))
         except IntegrityError:
             flash("Roll No already exists. / Roll No आधीच आहे.")
 
@@ -169,25 +230,29 @@ def student():
         return redirect(url_for("student_login"))
     return redirect(url_for("student_dashboard"))
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        role = request.form.get("role", "student")
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        if role == "admin":
+            if username == ADMIN_USER and password == ADMIN_PASS:
+                session.clear(); session["admin"] = True
+                return redirect(url_for("dashboard"))
+            flash("Admin username/password चुकीचे आहेत.")
+        else:
+            with engine.begin() as c:
+                s = c.execute(text("SELECT id, password_hash FROM students WHERE LOWER(username)=LOWER(:u) LIMIT 1"), {"u": username}).mappings().first()
+            if s and s["password_hash"] and check_password_hash(s["password_hash"], password):
+                session.clear(); session["student_id"] = s["id"]
+                return redirect(url_for("student_dashboard"))
+            flash("Student username/password चुकीचे आहेत.")
+    return render_template("login.html")
+
 @app.route("/student/login", methods=["GET", "POST"])
 def student_login():
-    if session.get("student_id"):
-        return redirect(url_for("student_dashboard"))
-    if request.method == "POST":
-        roll = request.form.get("roll", "").strip()
-        phone = request.form.get("phone", "").strip()
-        with engine.begin() as c:
-            s = c.execute(text("""
-                SELECT id, name FROM students
-                WHERE LOWER(roll)=LOWER(:roll) AND phone=:phone
-                LIMIT 1
-            """), {"roll": roll, "phone": phone}).mappings().first()
-        if s:
-            session.clear()
-            session["student_id"] = s["id"]
-            return redirect(url_for("student_dashboard"))
-        flash("Roll No. आणि Mobile No. जुळत नाहीत. / Login details do not match.")
-    return render_template("student_login.html")
+    return redirect(url_for("login"))
 
 @app.get("/student/logout")
 def student_logout():
@@ -260,15 +325,7 @@ def mark_attendance():
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
-    if request.method == "POST":
-        if (request.form["username"] == ADMIN_USER and
-                request.form["password"] == ADMIN_PASS):
-            session["admin"] = True
-            return redirect(url_for("dashboard"))
-
-        flash("Invalid admin login. / चुकीचे Admin Login.")
-
-    return render_template("login.html")
+    return redirect(url_for("login"))
 
 @app.get("/admin/logout")
 def logout():
@@ -297,10 +354,8 @@ def dashboard():
             SELECT student_id, meal FROM attendance WHERE menu_date=:d
         """), {"d": date.today()}).mappings().all()
 
-    lunch_ids = {x["student_id"] for x in today_attendance if x["meal"] == "Lunch"}
-    dinner_ids = {x["student_id"] for x in today_attendance if x["meal"] == "Dinner"}
-    return render_template("admin.html", students=students, counts=counts,
-                           lunch_ids=lunch_ids, dinner_ids=dinner_ids, q=q)
+    meal_ids = {meal: {x["student_id"] for x in today_attendance if x["meal"] == meal} for meal in ["Breakfast", "Lunch", "Evening Snacks", "Dinner"]}
+    return render_template("admin.html", students=students, counts=counts, meal_ids=meal_ids, q=q)
 
 @app.get("/admin/student")
 @admin_required
@@ -348,15 +403,19 @@ def edit_student(student_id):
             roll = request.form["roll"].strip()
             phone = request.form.get("phone", "").strip()
             course = request.form.get("course", "").strip()
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "").strip()
             photo_data = save_photo(request.files.get("photo"))
             keep_photo = request.form.get("keep_photo") == "1"
             if photo_data is None and keep_photo:
                 photo_data = student.get("photo_data")
             try:
-                c.execute(text("""
-                    UPDATE students SET name=:name, roll=:roll, phone=:phone, course=:course, photo_data=:photo
-                    WHERE id=:id
-                """), {"name":name,"roll":roll,"phone":phone,"course":course,"photo":photo_data,"id":student_id})
+                if not username:
+                    username = student.get("username") or roll
+                if password:
+                    c.execute(text("""UPDATE students SET name=:name, roll=:roll, phone=:phone, course=:course, photo_data=:photo, username=:username, password_hash=:password_hash WHERE id=:id"""), {"name":name,"roll":roll,"phone":phone,"course":course,"photo":photo_data,"username":username,"password_hash":generate_password_hash(password),"id":student_id})
+                else:
+                    c.execute(text("""UPDATE students SET name=:name, roll=:roll, phone=:phone, course=:course, photo_data=:photo, username=:username WHERE id=:id"""), {"name":name,"roll":roll,"phone":phone,"course":course,"photo":photo_data,"username":username,"id":student_id})
                 flash("Student updated. / विद्यार्थी माहिती अपडेट झाली.")
                 return redirect(url_for("admin_student", q=roll))
             except IntegrityError:
@@ -368,21 +427,24 @@ def edit_student(student_id):
 def admin_attendance():
     student_id = request.form["student_id"]
     meal = request.form["meal"]
-
+    student = None
+    inserted = False
     with engine.begin() as c:
+        student = c.execute(text("SELECT id, name, phone FROM students WHERE id=:id"), {"id": student_id}).mappings().first()
+        if not student:
+            flash("Student not found.")
+            return redirect(url_for("dashboard"))
         try:
-            c.execute(text("""
-                INSERT INTO attendance(student_id, menu_date, meal)
-                VALUES(:sid, :d, :meal)
-            """), {
-                "sid": student_id,
-                "d": date.today(),
-                "meal": meal
-            })
-            flash("Attendance saved. / उपस्थिती सेव्ह झाली.")
+            c.execute(text("""INSERT INTO attendance(student_id, menu_date, meal) VALUES(:sid, :d, :meal)"""), {"sid": student_id,"d": date.today(),"meal": meal})
+            inserted = True
         except IntegrityError:
             flash("Attendance already saved. / उपस्थिती आधीच सेव्ह आहे.")
-
+    if inserted:
+        ok, detail = whatsapp_notify(student, meal)
+        if ok:
+            flash(f"{meal} attendance saved. WhatsApp message sent to {student['name']}.")
+        else:
+            flash(f"{meal} attendance saved. WhatsApp message not sent (API setup pending).")
     return redirect(url_for("dashboard"))
 
 @app.post("/admin/menu")
@@ -420,6 +482,16 @@ def payment():
                 "note": request.form.get("note", "")
             })
 
+    return redirect(url_for("dashboard"))
+
+@app.post("/admin/student/<int:student_id>/delete")
+@admin_required
+def delete_student(student_id):
+    with engine.begin() as c:
+        c.execute(text("DELETE FROM attendance WHERE student_id=:id"), {"id": student_id})
+        c.execute(text("DELETE FROM payments WHERE student_id=:id"), {"id": student_id})
+        c.execute(text("DELETE FROM students WHERE id=:id"), {"id": student_id})
+    flash("Student removed. / विद्यार्थी काढून टाकला.")
     return redirect(url_for("dashboard"))
 
 @app.get("/admin/export")

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="hero student-hero">
+  <div>
+    <h2>👨‍🎓 My Student Dashboard / माझे विद्यार्थी डॅशबोर्ड</h2>
+    <p>Welcome, {{ student.name }} • Roll No: {{ student.roll }}</p>
+  </div>
+  <a class="btn light-btn" href="/student/logout">Logout / बाहेर पडा</a>
+</div>
+
+<div class="profile-grid">
+  <div class="card profile-card">
+    {% if student.photo_data %}<img class="profile-photo" src="{{student.photo_data}}">{% else %}<div class="profile-photo placeholder">👤</div>{% endif %}
+    <h2>{{ student.name }}</h2>
+    <p><b>Roll:</b> {{ student.roll }}</p>
+    <p><b>Course:</b> {{ student.course or '-' }}</p>
+    <p><b>Mobile:</b> {{ student.phone or '-' }}</p>
+  </div>
+  <div>
+    <div class="grid student-stats">
+      <div class="card stat-card"><div>📅</div><div class="stat">{{ month_counts.days or 0 }}</div><div>Present Days</div></div>
+      <div class="card stat-card"><div>🍽️</div><div class="stat">{{ month_counts.total or 0 }}</div><div>Meals Present</div></div>
+      <div class="card stat-card"><div>💰</div><div class="stat">₹{{ "%.0f"|format(paid_total|float) }}</div><div>Total Paid</div></div>
+      <div class="card stat-card"><div>🗓️</div><div class="stat">{{ month_name }}</div><div>Current Month</div></div>
+    </div>
+    <div class="card">
+      <h2>☀️🌙 Today / आजची उपस्थिती</h2>
+      <div class="meal-grid">
+        <div class="meal attendance-box"><b>☀️ Lunch / दुपारचे जेवण</b>{% if 'Lunch' in today_meals %}<span class="ok">✓ Present</span>{% else %}<span class="muted">Not marked / नोंद नाही</span>{% endif %}</div>
+        <div class="meal attendance-box"><b>🌙 Dinner / रात्रीचे जेवण</b>{% if 'Dinner' in today_meals %}<span class="ok">✓ Present</span>{% else %}<span class="muted">Not marked / नोंद नाही</span>{% endif %}</div>
+      </div>
+      <p class="muted">Attendance फक्त Admin कडून नोंदवली जाते.</p>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>🍽️ Mess Menu / आजचा मेनू</h2>
+  <div class="menu-list">
+  {% for m in menus %}
+    <div class="menu-row"><b>{{ m.menu_date }} • {{ m.meal }}</b><span>{{ m.item }}</span></div>
+  {% else %}
+    <p class="muted">Admin ने अजून मेनू टाकलेला नाही.</p>
+  {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>📊 Attendance History / उपस्थिती इतिहास</h2>
+  <div class="history-wrap"><table><thead><tr><th>Date</th><th>Meal</th><th>Saved</th></tr></thead><tbody>
+  {% for a in attendance %}<tr><td>{{a.menu_date}}</td><td>{{a.meal}}</td><td>{{a.created_at}}</td></tr>{% else %}<tr><td colspan="3">No attendance yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+
+<div class="card">
+  <h2>💰 Payment History / पेमेंट इतिहास</h2>
+  <h3>Total Paid: ₹{{ "%.2f"|format(paid_total|float) }}</h3>
+  <div class="history-wrap"><table><thead><tr><th>Date</th><th>Amount</th><th>Note</th></tr></thead><tbody>
+  {% for p in payments %}<tr><td>{{p.paid_date}}</td><td>₹{{"%.2f"|format(p.amount|float)}}</td><td>{{p.note or '-'}}</td></tr>{% else %}<tr><td colspan="3">No payments yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+
+<div class="info-grid">
+  <div class="card"><b>🔔 Mess Updates / सूचना</b><p>मेसच्या वेळा किंवा विशेष सूचनांसाठी Admin कडून अपडेट तपासा.</p></div>
+  <div class="card"><b>📞 Contact / संपर्क</b><p><a class="btn" href="tel:9860851681">Call Admin</a> <a class="btn secondary" href="https://wa.me/919860851681" target="_blank">WhatsApp</a></p></div>
+</div>
+{% endblock %}

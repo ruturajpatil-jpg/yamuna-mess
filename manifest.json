@@ -1,0 +1,14 @@
+{
+  "name": "श्री स्वामी समर्थ फूड्स – यमुना मेस",
+  "short_name": "यमुना मेस",
+  "description": "Yamuna Mess student meal portal",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f1e9",
+  "theme_color": "#7b1e1e",
+  "lang": "mr",
+  "icons": [
+    {"src": "/static/logo.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

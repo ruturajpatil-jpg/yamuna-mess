@@ -4,3 +4,5 @@ psycopg[binary]>=3.2,<4
 gunicorn>=23,<24
 psycopg2-binary>=2.9,<3
 Pillow>=10,<12
+
+requests>=2.32,<3

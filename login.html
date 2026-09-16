@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow login-card">
+  <div class="login-icon">🔐</div>
+  <h2>Yamuna Mess Login / लॉगिन</h2>
+  <p class="muted">Admin किंवा Student निवडा आणि Username + Password वापरा.</p>
+  <div class="role-switch"><button type="button" class="role-btn active" onclick="setRole('student', this)">👨‍🎓 Student</button><button type="button" class="role-btn" onclick="setRole('admin', this)">🛠️ Admin</button></div>
+  <form method="post">
+    <input type="hidden" id="role" name="role" value="student">
+    <input name="username" placeholder="Username / यूजरनेम" required>
+    <input name="password" type="password" placeholder="Password / पासवर्ड" required>
+    <button type="submit">Login / लॉगिन</button>
+  </form>
+  <a class="btn secondary full-btn" href="/register">📝 New Student Registration / नवीन नोंदणी</a>
+</div>
+<script>function setRole(role, btn){document.getElementById('role').value=role;document.querySelectorAll('.role-btn').forEach(x=>x.classList.remove('active'));btn.classList.add('active');}</script>
+{% endblock %}
