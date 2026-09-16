@@ -112,13 +112,19 @@ def init_db():
             "ALTER TABLE students ADD COLUMN IF NOT EXISTS password_hash TEXT"
         ]:
             c.execute(text(stmt))
-        # Give existing students a safe transitional login: username=roll, password=old mobile.
+        # Keep existing usernames intact. For old students missing credentials,
+        # create a compatible login using roll as username and mobile (or roll) as password.
         try:
-            rows = c.execute(text("SELECT id, roll, phone FROM students WHERE username IS NULL OR password_hash IS NULL")).mappings().all()
+            rows = c.execute(text("SELECT id, roll, phone, username, password_hash FROM students")).mappings().all()
             for r in rows:
-                c.execute(text("UPDATE students SET username=:u, password_hash=:p WHERE id=:id"), {
-                    "u": r["roll"], "p": generate_password_hash(r["phone"] or r["roll"]), "id": r["id"]
-                })
+                if not r["username"]:
+                    c.execute(text("UPDATE students SET username=:u WHERE id=:id"), {
+                        "u": r["roll"], "id": r["id"]
+                    })
+                if not r["password_hash"]:
+                    c.execute(text("UPDATE students SET password_hash=:p WHERE id=:id"), {
+                        "p": generate_password_hash(r["phone"] or r["roll"]), "id": r["id"]
+                    })
         except Exception:
             pass
 
@@ -242,7 +248,12 @@ def login():
             flash("Admin username/password चुकीचे आहेत.")
         else:
             with engine.begin() as c:
-                s = c.execute(text("SELECT id, password_hash FROM students WHERE LOWER(username)=LOWER(:u) LIMIT 1"), {"u": username}).mappings().first()
+                s = c.execute(text("""
+                    SELECT id, password_hash FROM students
+                    WHERE LOWER(COALESCE(username, ''))=LOWER(:u)
+                       OR LOWER(roll)=LOWER(:u)
+                    LIMIT 1
+                """), {"u": username}).mappings().first()
             if s and s["password_hash"] and check_password_hash(s["password_hash"], password):
                 session.clear(); session["student_id"] = s["id"]
                 return redirect(url_for("student_dashboard"))
