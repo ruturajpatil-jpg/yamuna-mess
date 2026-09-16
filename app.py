@@ -104,15 +104,14 @@ def init_db():
         else:
             c.execute(text(SCHEMA))
         # Safe migration for existing Railway/PostgreSQL or local databases.
+        # IMPORTANT: use IF NOT EXISTS so one already-present column does not
+        # abort the PostgreSQL transaction and prevent later columns from being added.
         for stmt in [
-            "ALTER TABLE students ADD COLUMN photo_data TEXT",
-            "ALTER TABLE students ADD COLUMN username TEXT",
-            "ALTER TABLE students ADD COLUMN password_hash TEXT"
+            "ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_data TEXT",
+            "ALTER TABLE students ADD COLUMN IF NOT EXISTS username TEXT",
+            "ALTER TABLE students ADD COLUMN IF NOT EXISTS password_hash TEXT"
         ]:
-            try:
-                c.execute(text(stmt))
-            except Exception:
-                pass
+            c.execute(text(stmt))
         # Give existing students a safe transitional login: username=roll, password=old mobile.
         try:
             rows = c.execute(text("SELECT id, roll, phone FROM students WHERE username IS NULL OR password_hash IS NULL")).mappings().all()
