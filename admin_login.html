@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card narrow login-card">
+  <div class="login-icon">🔐</div>
+  <h2>Admin Login / व्यवस्थापक लॉगिन</h2>
+  <p class="muted">फक्त Admin Username आणि Password वापरा.</p>
+  <form method="post" action="/admin/login" autocomplete="off">
+    <input name="username" placeholder="Admin Username" required autocomplete="username">
+    <input name="password" type="password" placeholder="Admin Password" required autocomplete="current-password">
+    <button type="submit">Login / लॉगिन</button>
+  </form>
+  <a class="btn secondary full-btn" href="/login">👨‍🎓 Student Login</a>
+</div>
+{% endblock %}

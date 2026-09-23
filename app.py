@@ -14,8 +14,8 @@ import requests
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "CHANGE_ME_IN_RAILWAY")
 
-ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
-ADMIN_PASS = os.environ.get("ADMIN_PASS", "CHANGE_ME_IN_RAILWAY")
+ADMIN_USER = os.environ.get("ADMIN_USER", "admin").strip()
+ADMIN_PASS = os.environ.get("ADMIN_PASS", "CHANGE_ME_IN_RAILWAY").strip()
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgres://"):
@@ -238,7 +238,7 @@ def student():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        role = request.form.get("role", "student")
+        role = request.form.get("role", request.args.get("role", "student"))
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         if role == "admin":
@@ -335,7 +335,18 @@ def mark_attendance():
 
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
-    return redirect(url_for("login"))
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        # Read variables at request time so Railway changes are always used.
+        admin_user = os.environ.get("ADMIN_USER", "").strip()
+        admin_pass = os.environ.get("ADMIN_PASS", "").strip()
+        if username and password and admin_user and password == admin_pass and username.lower() == admin_user.lower():
+            session.clear()
+            session["admin"] = True
+            return redirect(url_for("dashboard"))
+        flash("Admin username/password चुकीचे आहेत. / Admin credentials do not match.")
+    return render_template("admin_login.html")
 
 @app.get("/admin/logout")
 def logout():

@@ -4,9 +4,9 @@
   <div class="login-icon">🔐</div>
   <h2>Yamuna Mess Login / लॉगिन</h2>
   <p class="muted">Admin किंवा Student निवडा आणि Username + Password वापरा.</p>
-  <div class="role-switch"><button type="button" class="role-btn active" onclick="setRole('student', this)">👨‍🎓 Student</button><button type="button" class="role-btn" onclick="setRole('admin', this)">🛠️ Admin</button></div>
+  <div class="role-switch"><button type="button" class="role-btn {{ "active" if request.args.get("role") != "admin" else "" }}" onclick="setRole('student', this)">👨‍🎓 Student</button><button type="button" class="role-btn {{ "active" if request.args.get("role") == "admin" else "" }}" onclick="setRole('admin', this)">🛠️ Admin</button></div>
   <form method="post">
-    <input type="hidden" id="role" name="role" value="student">
+    <input type="hidden" id="role" name="role" value="{{ 'admin' if request.args.get('role') == 'admin' else 'student' }}">
     <input name="username" placeholder="Username / यूजरनेम" required>
     <input name="password" type="password" placeholder="Password / पासवर्ड" required>
     <button type="submit">Login / लॉगिन</button>
