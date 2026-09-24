@@ -1,4 +1,37 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card narrow"><h2>✏️ Edit Student / विद्यार्थी माहिती बदला</h2><form method="post" enctype="multipart/form-data"><input name="name" value="{{student.name}}" required><input name="roll" value="{{student.roll}}" required><input name="phone" value="{{student.phone or ''}}"><input name="course" value="{{student.course or ''}}"><label class="file-label">📸 Change Photo<input type="file" name="photo" accept="image/*"></label>{% if student.photo_data %}<input type="hidden" name="keep_photo" value="1"><img class="edit-photo" src="{{student.photo_data}}">{% endif %}<button>Save Changes / बदल जतन करा</button><a class="btn secondary" href="/admin">Cancel</a></form></div>
+<div class="card narrow">
+  <h2>✏️ Edit Student / विद्यार्थी माहिती बदला</h2>
+
+  <form method="post" enctype="multipart/form-data">
+    <input name="name" value="{{student.name}}" placeholder="Name" required>
+    <input name="roll" value="{{student.roll}}" placeholder="Roll No" required>
+    <input name="phone" value="{{student.phone or ''}}" placeholder="Mobile">
+    <input name="course" value="{{student.course or ''}}" placeholder="Course">
+
+    <label class="file-label">
+      📸 Change Photo
+      <input type="file" name="photo" accept="image/*">
+    </label>
+
+    {% if student.photo_data %}
+      <input type="hidden" name="keep_photo" value="1">
+      <img class="edit-photo" src="{{student.photo_data}}">
+    {% endif %}
+
+    <button type="submit">Save Changes / बदल जतन करा</button>
+    <a class="btn secondary" href="/admin">Cancel</a>
+  </form>
+
+  <hr style="margin:22px 0;">
+
+  <form method="post"
+        action="{{ url_for('delete_student', student_id=student.id) }}"
+        onsubmit="return confirm('हा विद्यार्थी आणि त्याची Attendance व Payment records कायमचे remove करायचे आहेत का?');">
+    <button type="submit"
+            style="width:100%;background:#b91c1c;color:#fff;border:0;padding:13px 16px;border-radius:10px;font-weight:700;cursor:pointer;">
+      🗑️ Remove Student / विद्यार्थी Remove करा
+    </button>
+  </form>
+</div>
 {% endblock %}
