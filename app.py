@@ -305,7 +305,7 @@ def student_dashboard():
             LIMIT 20
         """), {"d": today}).mappings().all()
         payments = c.execute(text("""
-            SELECT amount, paid_date, note FROM payments
+            SELECT id, amount, paid_month, paid_date, payment_mode, note FROM payments
             WHERE student_id=:sid ORDER BY paid_date DESC, id DESC
         """), {"sid": sid}).mappings().all()
         paid_total = c.execute(text("SELECT COALESCE(SUM(amount),0) FROM payments WHERE student_id=:sid"), {"sid": sid}).scalar()
@@ -422,7 +422,7 @@ def admin_student():
         """), {"sid": student["id"], "d": date.today()}).scalars().all()
 
     return render_template("admin_student.html", student=student, attendance=attendance,
-                           payments=payments, today_meals=set(today))
+                           payments=payments, today_meals=set(today), today_date=date.today())
 
 @app.route("/admin/student/<int:student_id>/edit", methods=["GET", "POST"])
 @admin_required
@@ -461,25 +461,55 @@ def edit_student(student_id):
 def admin_attendance():
     student_id = request.form["student_id"]
     meal = request.form["meal"]
-    student = None
-    inserted = False
     with engine.begin() as c:
-        student = c.execute(text("SELECT id, name, phone FROM students WHERE id=:id"), {"id": student_id}).mappings().first()
+        student = c.execute(text("SELECT id, name FROM students WHERE id=:id"), {"id": student_id}).mappings().first()
         if not student:
             flash("Student not found.")
             return redirect(url_for("dashboard"))
         try:
             c.execute(text("""INSERT INTO attendance(student_id, menu_date, meal) VALUES(:sid, :d, :meal)"""), {"sid": student_id,"d": date.today(),"meal": meal})
-            inserted = True
+            flash(f"{meal} attendance saved for {student['name']}. / उपस्थिती सेव्ह झाली.")
         except IntegrityError:
             flash("Attendance already saved. / उपस्थिती आधीच सेव्ह आहे.")
-    if inserted:
-        ok, detail = whatsapp_notify(student, meal)
-        if ok:
-            flash(f"{meal} attendance saved. WhatsApp message sent to {student['name']}.")
-        else:
-            flash(f"{meal} attendance saved. WhatsApp message not sent (API setup pending).")
     return redirect(url_for("dashboard"))
+
+@app.route("/admin/attendance/edit", methods=["GET", "POST"])
+@admin_required
+def edit_attendance():
+    student_id = request.values.get("student_id", "").strip()
+    meal = request.values.get("meal", "").strip()
+    attendance_date = request.values.get("attendance_date", str(date.today())).strip()
+    valid_meals = {"Breakfast", "Lunch", "Evening Snacks", "Dinner"}
+    if not student_id.isdigit() or meal not in valid_meals:
+        flash("Invalid attendance details. / उपस्थिती माहिती चुकीची आहे.")
+        return redirect(url_for("dashboard"))
+
+    with engine.begin() as c:
+        student = c.execute(text("SELECT id, name, roll FROM students WHERE id=:id"), {"id": int(student_id)}).mappings().first()
+        if not student:
+            flash("Student not found. / विद्यार्थी सापडला नाही.")
+            return redirect(url_for("dashboard"))
+
+        current = c.execute(text("""
+            SELECT id FROM attendance
+            WHERE student_id=:sid AND menu_date=:d AND meal=:meal
+        """), {"sid": int(student_id), "d": attendance_date, "meal": meal}).mappings().first()
+
+        if request.method == "POST":
+            status = request.form.get("status", "Present")
+            if status == "Present":
+                if not current:
+                    c.execute(text("""INSERT INTO attendance(student_id, menu_date, meal)
+                                    VALUES(:sid, :d, :meal)"""),
+                              {"sid": int(student_id), "d": attendance_date, "meal": meal})
+                flash(f"{meal} attendance updated for {student['name']}. / उपस्थिती अपडेट झाली.")
+            else:
+                if current:
+                    c.execute(text("DELETE FROM attendance WHERE id=:id"), {"id": current["id"]})
+                flash(f"{meal} attendance removed for {student['name']}. / उपस्थिती काढली.")
+            return redirect(url_for("admin_student", q=student["roll"]))
+
+    return render_template("edit_attendance.html", student=student, meal=meal, attendance_date=attendance_date, current_status="Present" if current else "Not Present")
 
 @app.post("/admin/menu")
 @admin_required

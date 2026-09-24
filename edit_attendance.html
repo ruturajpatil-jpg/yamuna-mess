@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="hero admin-hero"><div><h2>✏️ Edit Attendance / उपस्थिती एडिट</h2><p>{{ student.name }} • Roll No: {{ student.roll }}</p></div><a class="btn light-btn" href="/admin/student?q={{ student.roll }}">← Back</a></div>
+<div class="card narrow">
+  <h2>{{ meal }}</h2>
+  <p><b>Date:</b> {{ attendance_date }}</p>
+  <form method="post">
+    <input type="hidden" name="student_id" value="{{ student.id }}">
+    <input type="hidden" name="meal" value="{{ meal }}">
+    <input type="hidden" name="attendance_date" value="{{ attendance_date }}">
+    <label><b>Attendance Status / उपस्थिती</b></label>
+    <select name="status">
+      <option value="Present" {% if current_status == 'Present' %}selected{% endif %}>✓ Present / उपस्थित</option>
+      <option value="Not Present" {% if current_status != 'Present' %}selected{% endif %}>✕ Not Present / अनुपस्थित</option>
+    </select>
+    <button type="submit">💾 Save Changes / बदल सेव्ह करा</button>
+  </form>
+  <p class="muted">हा बदल Student Dashboard वर लगेच दिसेल. WhatsApp notification नंतर जोडू.</p>
+</div>
+{% endblock %}

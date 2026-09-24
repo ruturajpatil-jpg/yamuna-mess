@@ -26,8 +26,10 @@
     <div class="card">
       <h2>☀️🌙 Today / आजची उपस्थिती</h2>
       <div class="meal-grid">
-        <div class="meal attendance-box"><b>☀️ Lunch / दुपारचे जेवण</b>{% if 'Lunch' in today_meals %}<span class="ok">✓ Present</span>{% else %}<span class="muted">Not marked / नोंद नाही</span>{% endif %}</div>
-        <div class="meal attendance-box"><b>🌙 Dinner / रात्रीचे जेवण</b>{% if 'Dinner' in today_meals %}<span class="ok">✓ Present</span>{% else %}<span class="muted">Not marked / नोंद नाही</span>{% endif %}</div>
+        <div class="meal attendance-box"><b>🌅 सकाळचा नाश्ता / Breakfast</b>{% if 'Breakfast' in today_meals %}<span class="ok">✓ Present</span>{% else %}<span class="muted">Not marked / नोंद नाही</span>{% endif %}</div>
+        <div class="meal attendance-box"><b>☀️ दुपारचे जेवण / Lunch</b>{% if 'Lunch' in today_meals %}<span class="ok">✓ Present</span>{% else %}<span class="muted">Not marked / नोंद नाही</span>{% endif %}</div>
+        <div class="meal attendance-box"><b>🌆 सायंकाळचा नाश्ता / Evening Snacks</b>{% if 'Evening Snacks' in today_meals %}<span class="ok">✓ Present</span>{% else %}<span class="muted">Not marked / नोंद नाही</span>{% endif %}</div>
+        <div class="meal attendance-box"><b>🌙 संध्याकाळचे जेवण / Dinner</b>{% if 'Dinner' in today_meals %}<span class="ok">✓ Present</span>{% else %}<span class="muted">Not marked / नोंद नाही</span>{% endif %}</div>
       </div>
       <p class="muted">Attendance फक्त Admin कडून नोंदवली जाते.</p>
     </div>
