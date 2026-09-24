@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS payments (
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     amount NUMERIC(12,2) NOT NULL,
     paid_date DATE NOT NULL,
+    paid_month TEXT,
+    payment_mode TEXT,
     note TEXT
 );
 """
@@ -98,6 +100,8 @@ def init_db():
                     student_id INTEGER NOT NULL,
                     amount NUMERIC(12,2) NOT NULL,
                     paid_date DATE NOT NULL,
+                    paid_month TEXT,
+                    payment_mode TEXT,
                     note TEXT
                 );
             """))
@@ -109,7 +113,9 @@ def init_db():
         for stmt in [
             "ALTER TABLE students ADD COLUMN IF NOT EXISTS photo_data TEXT",
             "ALTER TABLE students ADD COLUMN IF NOT EXISTS username TEXT",
-            "ALTER TABLE students ADD COLUMN IF NOT EXISTS password_hash TEXT"
+            "ALTER TABLE students ADD COLUMN IF NOT EXISTS password_hash TEXT",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS paid_month TEXT",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_mode TEXT"
         ]:
             c.execute(text(stmt))
         # Keep existing usernames intact. For old students missing credentials,
@@ -303,9 +309,16 @@ def student_dashboard():
             WHERE student_id=:sid ORDER BY paid_date DESC, id DESC
         """), {"sid": sid}).mappings().all()
         paid_total = c.execute(text("SELECT COALESCE(SUM(amount),0) FROM payments WHERE student_id=:sid"), {"sid": sid}).scalar()
+        monthly_payments = c.execute(text("""
+            SELECT COALESCE(paid_month, strftime('%Y-%m', paid_date)) AS paid_month, SUM(amount) AS total
+            FROM payments WHERE student_id=:sid GROUP BY COALESCE(paid_month, strftime('%Y-%m', paid_date)) ORDER BY paid_month DESC
+        """), {"sid": sid}).mappings().all() if DATABASE_URL.startswith("sqlite") else c.execute(text("""
+            SELECT COALESCE(paid_month, TO_CHAR(paid_date, 'YYYY-MM')) AS paid_month, SUM(amount) AS total
+            FROM payments WHERE student_id=:sid GROUP BY COALESCE(paid_month, TO_CHAR(paid_date, 'YYYY-MM')) ORDER BY paid_month DESC
+        """), {"sid": sid}).mappings().all()
     return render_template("student_dashboard.html", student=student, attendance=attendance,
                            month_counts=month_counts, today_meals=today_meals, menus=menus,
-                           payments=payments, paid_total=paid_total, month_name=today.strftime("%B %Y"))
+                           payments=payments, monthly_payments=monthly_payments, paid_total=paid_total, month_name=today.strftime("%B %Y"))
 
 @app.post("/attendance")
 def mark_attendance():
@@ -486,23 +499,59 @@ def add_menu():
 @app.post("/admin/payment")
 @admin_required
 def payment():
+    roll = request.form["roll"].strip()
+    amount = float(request.form["amount"])
+    paid_date = request.form.get("paid_date") or str(date.today())
+    paid_month = request.form.get("paid_month", "").strip() or paid_date[:7]
+    payment_mode = request.form.get("payment_mode", "").strip()
+    note = request.form.get("note", "").strip()
     with engine.begin() as c:
-        s = c.execute(
-            text("SELECT id FROM students WHERE roll=:roll"),
-            {"roll": request.form["roll"]}
-        ).mappings().first()
+        s = c.execute(text("SELECT id FROM students WHERE LOWER(roll)=LOWER(:roll)"), {"roll": roll}).mappings().first()
+        if not s:
+            flash("Student Roll No सापडला नाही.")
+            return redirect(url_for("dashboard"))
+        c.execute(text("""
+            INSERT INTO payments(student_id, amount, paid_date, paid_month, payment_mode, note)
+            VALUES(:sid, :amount, :d, :month, :mode, :note)
+        """), {"sid": s["id"], "amount": amount, "d": paid_date, "month": paid_month, "mode": payment_mode, "note": note})
+    flash("Monthly payment saved. / महिन्याचे पेमेंट सेव्ह झाले.")
+    return redirect(url_for("admin_student", q=roll))
 
-        if s:
+@app.route("/admin/payment/<int:payment_id>/edit", methods=["GET", "POST"])
+@admin_required
+def edit_payment(payment_id):
+    with engine.begin() as c:
+        payment = c.execute(text("""
+            SELECT p.*, s.name, s.roll FROM payments p JOIN students s ON s.id=p.student_id
+            WHERE p.id=:id
+        """), {"id": payment_id}).mappings().first()
+        if not payment:
+            flash("Payment not found. / पेमेंट सापडले नाही.")
+            return redirect(url_for("dashboard"))
+        if request.method == "POST":
+            amount = float(request.form["amount"])
+            paid_date = request.form["paid_date"]
+            paid_month = request.form.get("paid_month", "").strip() or paid_date[:7]
+            payment_mode = request.form.get("payment_mode", "").strip()
+            note = request.form.get("note", "").strip()
             c.execute(text("""
-                INSERT INTO payments(student_id, amount, paid_date, note)
-                VALUES(:sid, :amount, :d, :note)
-            """), {
-                "sid": s["id"],
-                "amount": float(request.form["amount"]),
-                "d": date.today(),
-                "note": request.form.get("note", "")
-            })
+                UPDATE payments SET amount=:amount, paid_date=:paid_date, paid_month=:paid_month,
+                payment_mode=:payment_mode, note=:note WHERE id=:id
+            """), {"amount":amount,"paid_date":paid_date,"paid_month":paid_month,"payment_mode":payment_mode,"note":note,"id":payment_id})
+            flash("Payment updated. / पेमेंट अपडेट झाले.")
+            return redirect(url_for("admin_student", q=payment["roll"]))
+    return render_template("edit_payment.html", payment=payment)
 
+@app.post("/admin/payment/<int:payment_id>/delete")
+@admin_required
+def delete_payment(payment_id):
+    with engine.begin() as c:
+        payment = c.execute(text("SELECT p.id, s.roll FROM payments p JOIN students s ON s.id=p.student_id WHERE p.id=:id"), {"id": payment_id}).mappings().first()
+        if payment:
+            c.execute(text("DELETE FROM payments WHERE id=:id"), {"id": payment_id})
+            flash("Payment removed. / पेमेंट काढून टाकले.")
+            return redirect(url_for("admin_student", q=payment["roll"]))
+    flash("Payment not found. / पेमेंट सापडले नाही.")
     return redirect(url_for("dashboard"))
 
 @app.post("/admin/student/<int:student_id>/delete")
